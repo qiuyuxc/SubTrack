@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "license": "MIT",
   "private": true,
-  "description": "SubTrack — 订阅管理系统，Cloudflare Worker + D1 + Vue 3（Vercel 设计规范）",
+  "description": "SubTrack — 订阅管理系统，Cloudflare Worker + D1 + Vue 3",
   "type": "module",
   "scripts": {
     "install:all": "npm --prefix frontend install && npm --prefix worker install",
-    "install:web": "npm --prefix frontend install",
+    "install:web": "npm --prefix frontend install --no-audit --no-fund",
     "build": "npm --prefix frontend run build",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler versions upload",
     "start": "node tools/dev-server.mjs",
     "serve": "npm run build && npm run start",
     "seed:demo": "node tools/seed.mjs",
@@ -18,5 +20,8 @@
     "test:all": "npm run test && npm run test:render",
     "dev:api": "npm --prefix worker run dev",
     "dev:web": "npm --prefix frontend run dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
   }
 }

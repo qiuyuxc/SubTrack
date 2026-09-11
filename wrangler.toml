@@ -1,0 +1,46 @@
+name = "subtrack"
+main = "worker/src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# Variables and secrets added in the dashboard survive `wrangler deploy` instead
+# of being wiped by whatever this file declares.
+keep_vars = true
+
+# Create the database in the Cloudflare dashboard (Storage & Databases → D1),
+# then paste its database ID below. The tables are created on the first request.
+#   https://dash.cloudflare.com/?to=/:account/d1
+[[d1_databases]]
+binding = "DB"
+database_name = "subtrack_db"
+database_id = "ce5ddf69-507d-4efe-9038-2e4c86183efb"
+
+[vars]
+# Comma-separated list of allowed front-end origins, or "*" for any.
+ALLOWED_ORIGIN = "*"
+# The single admin account. There is no registration flow.
+ADMIN_USERNAME = "admin"
+
+# ADMIN_PASSWORD and AUTH_SECRET are secrets: set them in the dashboard under
+# Settings → Variables and Secrets (or `wrangler secret put`) instead of here.
+
+[observability]
+enabled = true
+
+# The built front end ships with the Worker, so one deployment serves both the
+# app and the API. Paths are relative to this file, which lives at the repo root
+# on purpose: `wrangler deploy` run from the root finds it without `--config`,
+# so a plain `npx wrangler deploy` cannot fall back to auto-configuration and
+# publish a static-assets-only Worker (no script, no D1, no variables).
+# `run_worker_first` keeps /api/* on the Worker and lets everything else be
+# served as an asset; unknown paths fall back to index.html, so deep links like
+# /login or /bills survive a refresh.
+[assets]
+directory = "./frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api", "/api/*"]
+
+# Daily at 01:00 UTC = 09:00 Asia/Shanghai.
+[triggers]
+crons = ["0 1 * * *"]

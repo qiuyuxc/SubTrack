@@ -77,7 +77,7 @@ watch(
         <div class="stack gap-xxs">
           <p class="caption">本月合计</p>
           <p class="display-md tabular">{{ formatMoney(bill.total, currency) }}</p>
-          <p class="caption">{{ bill.count }} 笔订阅 · {{ bill.label }}</p>
+          <p class="caption">{{ bill.count }} 笔扣费 · {{ bill.label }}</p>
         </div>
         <span v-if="bill.current" class="badge badge--success">本月</span>
       </div>
@@ -105,11 +105,14 @@ watch(
               <span class="caption tabular">{{ formatMoney(day.subtotal, currency) }}</span>
             </div>
             <ul class="charge-day__items">
-              <li v-for="item in day.items" :key="item.id" class="charge">
+              <li v-for="item in day.items" :key="`${item.chargeDate}-${item.id}`" class="charge">
                 <span class="charge__main">
                   <span class="body-sm strong truncate">{{ item.name }}</span>
                   <span class="caption truncate">
                     {{ item.vendor || '—' }} · {{ item.category }} · {{ cycleLabel(item.cycle) }}
+                  </span>
+                  <span v-if="item.scheduledDate && item.scheduledDate !== item.chargeDate" class="caption muted">
+                    提前续费 · 原定 {{ formatDateLong(item.scheduledDate) }}
                   </span>
                 </span>
                 <span class="charge__meta">

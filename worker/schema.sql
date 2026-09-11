@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS payments (
+  subscription_id TEXT NOT NULL,
+  period_start    TEXT NOT NULL,
+  paid_at         TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  PRIMARY KEY (subscription_id, period_start)
+);
+
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id           TEXT PRIMARY KEY,
   endpoint     TEXT NOT NULL UNIQUE,

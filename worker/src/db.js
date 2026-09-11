@@ -1,5 +1,5 @@
 import {
-  daysBetween, endOfMonth, isValidDate, json, monthKey, nowIso, num,
+  addCycles, daysBetween, endOfMonth, isValidDate, json, monthKey, nowIso, num,
   round2, startOfMonth, str, toDate, todayIn, uuid,
 } from './utils.js';
 
@@ -168,6 +168,9 @@ function normalizeReminderDays(value) {
   return Math.min(Math.max(Math.trunc(parsed), 1), 90);
 }
 
+/** Rough length of one billing cycle, for the progress meter. */
+const CYCLE_DAYS = { weekly: 7, monthly: 30.44, quarterly: 91.31, yearly: 365.25 };
+
 function hydrate(row, today, reminderDays) {
   const daysLeft = daysBetween(today, row.end_date);
   // A subscription may override the global reminder window (e.g. a 7-day plan
@@ -176,6 +179,9 @@ function hydrate(row, today, reminderDays) {
   const derivedStatus =
     row.status !== 'active' ? row.status : daysLeft < 0 ? 'expired' : 'active';
   const totalDays = Math.max(daysBetween(row.start_date, row.end_date), 1);
+  // A renewing subscription has no meaningful start-to-end span (the end keeps
+  // moving), so its meter tracks the current cycle instead.
+  const meterDays = (row.auto_renew && CYCLE_DAYS[row.cycle]) || totalDays;
   const months = totalDays / 30.44;
   return {
     id: row.id,
@@ -196,7 +202,7 @@ function hydrate(row, today, reminderDays) {
     daysLeft,
     expired: daysLeft < 0 && row.status === 'active',
     expiringSoon: row.status === 'active' && daysLeft >= 0 && daysLeft <= window,
-    progress: Math.min(100, Math.max(0, Math.round(((totalDays - Math.max(daysLeft, 0)) / totalDays) * 100))),
+    progress: Math.min(100, Math.max(0, Math.round(((meterDays - Math.max(daysLeft, 0)) / meterDays) * 100))),
     monthlyEquivalent: round2(row.amount / months),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -205,9 +211,179 @@ function hydrate(row, today, reminderDays) {
 
 /* ------------------------------------------------------------ subscriptions */
 
-export async function listSubscriptions(db, { status, q, sort } = {}) {
+/** Only a guard against a runaway loop on absurd data. */
+const MAX_CYCLES = 1200;
+
+/**
+ * The first cycle boundary after `today`, counted from the original start date
+ * so the billing day never drifts, and never earlier than what is already
+ * stored (a manually extended end date must not be shortened).
+ */
+function nextCycleDate(startDate, endDate, cycle, today) {
+  for (let periods = 1; periods <= MAX_CYCLES; periods += 1) {
+    const candidate = addCycles(startDate, cycle, periods);
+    if (!candidate) return null;
+    if (candidate > today && candidate > endDate) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The due date after a manual renewal: always at least one cycle further, and
+ * far enough ahead that a subscription in arrears lands back in this period.
+ * Unlike the automatic roll this counts from the stored due date, because
+ * "I paid for another month" means one month after what the panel already shows.
+ */
+function nextRenewalDate(endDate, cycle, today) {
+  for (let periods = 1; periods <= MAX_CYCLES; periods += 1) {
+    const candidate = addCycles(endDate, cycle, periods);
+    if (!candidate) return null;
+    if (candidate > today) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The days a subscription is charged on: the start date, then one entry per
+ * completed cycle. Extending `end_date` — which is exactly what a renewal does,
+ * automatic or manual — is what adds the next charge to the statement, so the
+ * ledger stays derived from the dates and can never drift out of sync.
+ * A one-off purchase is charged once, however long it stays valid.
+ */
+export function chargeDates(item) {
+  const dates = [item.startDate];
+  if (item.cycle === 'once') return dates;
+  for (let periods = 1; periods <= MAX_CYCLES; periods += 1) {
+    const date = addCycles(item.startDate, item.cycle, periods);
+    if (!date || date >= item.endDate) break;
+    dates.push(date);
+  }
+  return dates;
+}
+
+/** The cycle a renewal buys: the last charge date inside the new due date. */
+function lastChargeDate(startDate, cycle, endDate) {
+  const dates = chargeDates({ startDate, cycle, endDate });
+  return dates[dates.length - 1];
+}
+
+/**
+ * Manual renewals are paid *today* but buy a period that starts later, so the
+ * recorded payment date overrides the scheduled one on the statement.
+ * Automatic renewals need no record: their charge lands on the cycle boundary.
+ */
+async function loadPayments(db) {
+  const { results } = await db.prepare('SELECT subscription_id, period_start, paid_at FROM payments').all();
+  const map = new Map();
+  for (const row of results ?? []) {
+    const bucket = map.get(row.subscription_id) ?? new Map();
+    bucket.set(row.period_start, row.paid_at);
+    map.set(row.subscription_id, bucket);
+  }
+  return map;
+}
+
+/** Every charge a subscription generates, stamped with the day the money left. */
+function chargesOf(item, payments) {
+  const paid = payments.get(item.id);
+  return chargeDates(item).map((date) => ({
+    ...item,
+    scheduledDate: date,
+    chargeDate: paid?.get(date) ?? date,
+  }));
+}
+
+/** Charges of every non-cancelled subscription, grouped by the month they hit. */
+function chargesByMonth(items, payments) {
+  const byMonth = new Map();
+  for (const item of items) {
+    if (item.status === 'cancelled') continue;
+    for (const charge of chargesOf(item, payments)) {
+      const bucket = byMonth.get(monthKey(charge.chargeDate)) ?? [];
+      bucket.push(charge);
+      byMonth.set(monthKey(charge.chargeDate), bucket);
+    }
+  }
+  return byMonth;
+}
+
+/**
+ * Moves lapsed auto-renewing subscriptions into the current period: the end date
+ * walks forward in whole cycles from the start date, which stays put so past
+ * months keep their charges on the bill page.
+ */
+export async function rollAutoRenew(db, today) {
+  const { results } = await db.prepare(
+    `SELECT id, start_date, end_date, cycle FROM subscriptions
+      WHERE auto_renew = 1 AND status = 'active' AND end_date < ?`,
+  ).bind(today).all();
+
+  const now = nowIso();
+  const statements = [];
+  const rolled = [];
+  for (const row of results ?? []) {
+    const endDate = nextCycleDate(row.start_date, row.end_date, row.cycle, today);
+    if (!endDate) continue;
+    // Matching on the old end date keeps two concurrent ticks from rolling twice.
+    statements.push(
+      db
+        .prepare('UPDATE subscriptions SET end_date = ?, updated_at = ? WHERE id = ? AND end_date = ?')
+        .bind(endDate, now, row.id, row.end_date),
+    );
+    rolled.push({ id: row.id, previousEndDate: row.end_date, endDate });
+  }
+  if (statements.length) await db.batch(statements);
+  return rolled;
+}
+
+/** Settings plus today's date, with lapsed auto-renewals brought up to date. */
+async function settingsWithRoll(db) {
   const settings = await getSettings(db);
   const today = todayIn(settings.timezone);
+  await rollAutoRenew(db, today);
+  return { settings, today };
+}
+
+/**
+ * Manual renewal: pushes the due date one cycle further. It works on any
+ * subscription, not only auto-renewing ones — the usual reason to press it is
+ * "I already paid, but the panel does not know that yet".
+ */
+export async function renewSubscription(db, id) {
+  const settings = await getSettings(db);
+  const today = todayIn(settings.timezone);
+  const row = await db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(id).first();
+  if (!row) return { notFound: true };
+
+  const endDate = nextRenewalDate(row.end_date, row.cycle, today);
+  if (!endDate) return { errors: ['一次性买断的订阅没有下一个周期，请直接修改到期时间'] };
+
+  await db
+    .prepare('UPDATE subscriptions SET end_date = ?, updated_at = ? WHERE id = ?')
+    .bind(endDate, nowIso(), id)
+    .run();
+
+  // Paid now, valid later: the statement shows today's date for the cycle that
+  // was just bought, otherwise the renewal would not show up until its due date.
+  const periodStart = lastChargeDate(row.start_date, row.cycle, endDate);
+  await db
+    .prepare(
+      `INSERT INTO payments (subscription_id, period_start, paid_at, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (subscription_id, period_start) DO UPDATE SET paid_at = excluded.paid_at`,
+    )
+    .bind(id, periodStart, today, nowIso())
+    .run();
+
+  return {
+    previousEndDate: row.end_date,
+    charge: { periodStart, paidAt: today, amount: round2(row.amount) },
+    subscription: await getSubscription(db, id),
+  };
+}
+
+export async function listSubscriptions(db, { status, q, sort } = {}) {
+  const { settings, today } = await settingsWithRoll(db);
   const clauses = [];
   const params = [];
 
@@ -254,10 +430,10 @@ export async function listSubscriptions(db, { status, q, sort } = {}) {
 }
 
 export async function getSubscription(db, id) {
-  const settings = await getSettings(db);
+  const { settings, today } = await settingsWithRoll(db);
   const row = await db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(id).first();
   if (!row) return null;
-  return hydrate(row, todayIn(settings.timezone), settings.reminderDays);
+  return hydrate(row, today, settings.reminderDays);
 }
 
 export function validateSubscription(input) {
@@ -342,14 +518,14 @@ export async function updateSubscription(db, id, input) {
 export async function deleteSubscription(db, id) {
   const result = await db.prepare('DELETE FROM subscriptions WHERE id = ?').bind(id).run();
   await db.prepare('DELETE FROM notifications WHERE subscription_id = ?').bind(id).run();
+  await db.prepare('DELETE FROM payments WHERE subscription_id = ?').bind(id).run();
   return { deleted: (result.meta?.changes ?? 0) > 0 };
 }
 
 /* -------------------------------------------------------------------- stats */
 
 export async function computeStats(db) {
-  const settings = await getSettings(db);
-  const today = todayIn(settings.timezone);
+  const { settings, today } = await settingsWithRoll(db);
   const { results } = await db.prepare('SELECT * FROM subscriptions').all();
   const rows = results ?? [];
   const items = rows.map((row) => hydrate(row, today, settings.reminderDays));
@@ -368,8 +544,14 @@ export async function computeStats(db) {
     (item) => item.startDate <= monthEnd && item.endDate >= monthStart,
   );
 
+  // "Spent" counts real charges, not coverage: a weekly plan is charged four or
+  // five times a month, a yearly plan only in its renewal month, and a manual
+  // renewal lands on the day it was paid for.
+  const charges = chargesByMonth(items, await loadPayments(db));
+  const monthCharges = charges.get(monthKey(today)) ?? [];
+
   const totalSpend = round2(billable.reduce((sum, item) => sum + item.amount, 0));
-  const monthSpend = round2(monthlySubs.reduce((sum, item) => sum + item.amount, 0));
+  const monthSpend = round2(monthCharges.reduce((sum, charge) => sum + charge.amount, 0));
   const monthBudget = round2(settings.monthlyBudget);
   const remaining = round2(monthBudget - monthSpend);
   const monthlyEquivalent = round2(
@@ -394,9 +576,7 @@ export async function computeStats(db) {
     const date = new Date(toDate(monthStart));
     date.setUTCMonth(date.getUTCMonth() + i);
     const key = date.toISOString().slice(0, 7);
-    const amount = billable
-      .filter((item) => monthKey(item.startDate) <= key && monthKey(item.endDate) >= key)
-      .reduce((sum, item) => sum + item.amount, 0);
+    const amount = (charges.get(key) ?? []).reduce((sum, charge) => sum + charge.amount, 0);
     timeline.push({ month: key, amount: round2(amount) });
   }
 
@@ -444,21 +624,6 @@ function monthLabel(month) {
   return `${year}年${Number(m)}月`;
 }
 
-/** Day the charge is expected to land: the start day, clamped into that month. */
-function billingDate(item, month) {
-  if (monthKey(item.startDate) === month) return item.startDate;
-  const day = Number(item.startDate.slice(8, 10)) || 1;
-  const lastDay = Number(endOfMonth(month).slice(8, 10));
-  return `${month}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
-}
-
-/** Same rule as the dashboard: anything not cancelled that covers the month. */
-function billableIn(items, month) {
-  const from = startOfMonth(month);
-  const to = endOfMonth(month);
-  return items.filter((item) => item.status !== 'cancelled' && item.startDate <= to && item.endDate >= from);
-}
-
 function categoryTotals(items) {
   const map = new Map();
   for (const item of items) {
@@ -480,16 +645,18 @@ export async function listBills(db, { months = BILL_MONTHS } = {}) {
   const today = todayIn(settings.timezone);
   const { items } = await listSubscriptions(db, { status: 'all' });
 
+  const charges = chargesByMonth(items, await loadPayments(db));
+
   const list = [];
   for (let i = 0; i < months; i += 1) {
     const date = new Date(`${startOfMonth(today)}T00:00:00Z`);
     date.setUTCMonth(date.getUTCMonth() - i);
     const month = date.toISOString().slice(0, 7);
-    const billed = billableIn(items, month);
+    const billed = charges.get(month) ?? [];
     list.push({
       month,
       label: monthLabel(month),
-      total: round2(billed.reduce((sum, item) => sum + item.amount, 0)),
+      total: round2(billed.reduce((sum, charge) => sum + charge.amount, 0)),
       count: billed.length,
       byCategory: categoryTotals(billed),
       current: month === monthKey(today),
@@ -516,8 +683,7 @@ export async function getBill(db, month) {
   const today = todayIn(settings.timezone);
   const { items } = await listSubscriptions(db, { status: 'all' });
 
-  const billed = billableIn(items, month)
-    .map((item) => ({ ...item, chargeDate: billingDate(item, month) }))
+  const billed = (chargesByMonth(items, await loadPayments(db)).get(month) ?? [])
     .sort((a, b) => a.chargeDate.localeCompare(b.chargeDate) || a.name.localeCompare(b.name));
 
   return {
@@ -526,7 +692,7 @@ export async function getBill(db, month) {
     today,
     current: month === monthKey(today),
     currency: settings.currency,
-    total: round2(billed.reduce((sum, item) => sum + item.amount, 0)),
+    total: round2(billed.reduce((sum, charge) => sum + charge.amount, 0)),
     count: billed.length,
     byCategory: categoryTotals(billed),
     items: billed,

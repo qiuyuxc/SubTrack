@@ -59,6 +59,17 @@ const TABLES = [
 )`,
   'CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at DESC)',
 
+  // Manual renewals, so the statement can show the day the money actually left
+  // instead of the scheduled cycle date. Automatic charges need no row: they
+  // are derived from the subscription's dates.
+  `CREATE TABLE IF NOT EXISTS payments (
+  subscription_id TEXT NOT NULL,
+  period_start    TEXT NOT NULL,
+  paid_at         TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  PRIMARY KEY (subscription_id, period_start)
+)`,
+
   // One row per browser/device that subscribed to Web Push.
   `CREATE TABLE IF NOT EXISTS push_subscriptions (
   id           TEXT PRIMARY KEY,

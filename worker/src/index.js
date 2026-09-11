@@ -2,7 +2,8 @@ import { Router } from './router.js';
 import {
   computeStats, countPushSubscriptions, createSubscription, deletePushSubscription, deleteSubscription,
   getBill, getSettings, getSubscription, isBillMonth, listBills, listNotifications, listSubscriptions,
-  markNotificationsRead, publicSettings, savePushSubscription, saveSettings, unreadCount, updateSubscription,
+  markNotificationsRead, publicSettings, renewSubscription, savePushSubscription, saveSettings, unreadCount,
+  updateSubscription,
 } from './db.js';
 import { getVapidKeys } from './push.js';
 import { runReminders } from './reminder.js';
@@ -186,6 +187,13 @@ router.put('/api/subscriptions/:id', async (request, env, params) => {
   return json(result);
 });
 
+router.post('/api/subscriptions/:id/renew', async (request, env, params) => {
+  const result = await renewSubscription(env.DB, params.id);
+  if (result.notFound) return fail(404, '未找到该订阅');
+  if (result.errors) return fail(422, result.errors[0], result.errors);
+  return json(result);
+});
+
 router.delete('/api/subscriptions/:id', async (request, env, params) => {
   const result = await deleteSubscription(env.DB, params.id);
   if (!result.deleted) return fail(404, '未找到该订阅');
@@ -262,6 +270,13 @@ export default {
     try {
       const { handler, params, pathMatched } = router.match(request.method, url.pathname);
       if (!handler) {
+        // Anything outside /api/ is a front-end route. The assets binding serves
+        // index.html for those (`not_found_handling = single-page-application`),
+        // which is how /login and /bills survive a refresh.
+        if (!pathMatched && !url.pathname.startsWith('/api') && ['GET', 'HEAD'].includes(request.method) && env.ASSETS) {
+          const asset = await env.ASSETS.fetch(request);
+          if (asset.status !== 404) return asset;
+        }
         return json(
           { error: { message: pathMatched ? '方法不被支持' : '接口不存在', path: url.pathname } },
           { status: pathMatched ? 405 : 404, headers: cors },

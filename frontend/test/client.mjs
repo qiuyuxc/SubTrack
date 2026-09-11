@@ -14,13 +14,14 @@ import { createMemoryHistory } from 'vue-router';
 
 import App from '../src/App.vue';
 import { createAppRouter } from '../src/router.js';
-import { disableBrowserPush, enableBrowserPush, ensureSession, loadPublicConfig, state } from '../src/store.js';
+import { api } from '../src/api.js';
+import { createSubscription, disableBrowserPush, enableBrowserPush, ensureSession, loadPublicConfig, state } from '../src/store.js';
 import { dialogState } from '../src/lib/dialog.js';
 import worker from '../../worker/src/index.js';
 import schemaSql from '../../worker/schema.sql?raw';
 import seedSql from '../../worker/seed.sql?raw';
 import { createD1 } from '../../worker/test/d1-shim.mjs';
-import { addDays, todayIn } from '../../worker/src/utils.js';
+import { addCycles, addDays, todayIn } from '../../worker/src/utils.js';
 
 const TZ = 'Asia/Shanghai';
 const TODAY = todayIn(TZ);
@@ -259,6 +260,45 @@ async function main() {
   check('row is removed after confirming', !rows().some((row) => row.includes('测试订阅 A')));
   check('store count returns to 7', state.stats.counts.total === 7);
 
+  console.log('\ndelete from the overview panel');
+  {
+    await createSubscription({ name: '概览删除演练', amount: 9, startDate: TODAY, endDate: addDays(TODAY, 30) });
+    await go('/dashboard');
+    const target = $$('tbody tr').find((row) => row.textContent.includes('概览删除演练'));
+    check('the overview lists the new subscription', Boolean(target));
+
+    target.querySelector('[aria-label="删除"]').click();
+    await flush();
+    check('the overview asks before deleting', Boolean($('.modal')) && $('.modal')?.textContent.includes('删除这条订阅？'));
+
+    $('.modal__foot .btn--primary').click();
+    await flush(20);
+    await sleep(30);
+    await flush(20);
+    check('the overview drops the row after confirming', !$$('tbody tr').some((row) => row.textContent.includes('概览删除演练')));
+    check('the overview delete leaves the store at 7', state.stats.counts.total === 7);
+    await go('/subscriptions');
+  }
+
+  console.log('\nmanual renewal from the list');
+  {
+    // A yearly subscription: renewing it cannot disturb the reminder-window
+    // expectations the later blocks rely on.
+    const renewRow = $$('tbody tr').find((row) => row.textContent.includes('阿里云 ECS'));
+    check('every row offers a renew action', Boolean(renewRow?.querySelector('[aria-label="续期"]')));
+
+    const before = (await api.listSubscriptions({ q: '阿里云' })).items[0];
+    renewRow.querySelector('[aria-label="续期"]').click();
+    await flush(20);
+    await sleep(30);
+    await flush(20);
+
+    const after = (await api.listSubscriptions({ q: '阿里云' })).items[0];
+    check('renewing pushes the due date one cycle further', after.endDate === addCycles(before.endDate, 'yearly', 1));
+    check('the new due date is reported back', $$('.toast').some((toast) => toast.textContent.includes(after.endDate)));
+    check('the toast says the payment landed on the statement', $$('.toast').some((toast) => toast.textContent.includes('已记入本月账单')));
+  }
+
   console.log('\nper-subscription reminder window');
   $('.nav__cta').click();
   await flush();
@@ -409,6 +449,7 @@ async function main() {
   check('clicking a month opens the statement dialog', Boolean($('.modal')) && Boolean($('.bill')));
   check('dialog groups charges by day', $$('.bill .charge-day').length > 0);
   check('dialog lists at least one charge', $$('.bill .charge').length > 0);
+  check('an early renewal is marked as paid ahead of its cycle', $$('.bill .charge').some((row) => row.textContent.includes('提前续费')));
   check('dialog total matches the month row', Boolean(currentTotal) && $('.bill__hero')?.textContent.includes(currentTotal.replace(/\s+/g, '')));
 
   // The close affordance must survive on phones where the sheet hugs the top.

@@ -5,11 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute subtrack_db --remote --file=./schema.sql",
-    "db:init:local": "wrangler d1 execute subtrack_db --local --file=./schema.sql",
-    "db:seed:local": "wrangler d1 execute subtrack_db --local --file=./seed.sql",
+    "dev": "wrangler dev --config ../wrangler.toml",
+    "deploy": "wrangler deploy --config ../wrangler.toml",
+    "build": "echo 'Nothing to build: wrangler bundles src/ at deploy time.'",
+    "db:init": "wrangler d1 execute subtrack_db --remote --config ../wrangler.toml --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute subtrack_db --local --config ../wrangler.toml --file=./schema.sql",
+    "db:seed:local": "wrangler d1 execute subtrack_db --local --config ../wrangler.toml --file=./seed.sql",
     "test": "node test/smoke.mjs"
   },
   "devDependencies": {

@@ -14,7 +14,7 @@ import worker from '../src/index.js';
 import { SETTINGS_SCHEMA } from '../src/db.js';
 import { SCHEMA_SQL } from '../src/schema.js';
 
-import { addDays, todayIn } from '../src/utils.js';
+import { addCycles, addDays, todayIn } from '../src/utils.js';
 
 const db = createD1();
 db._sqlite.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
@@ -252,8 +252,10 @@ console.log('\ndashboard stats');
   const { body } = await call('GET', '/api/stats');
   const { stats } = body;
   check('total spend sums non-cancelled subscriptions', stats.spend.total === 1186);
-  check('monthly spend includes subscriptions covering this month', stats.spend.month === 1186);
-  check('remaining budget = budget - monthly spend', stats.budget.remaining === 300 - 1186);
+  const monthBill = (await call('GET', `/api/bills/${TODAY.slice(0, 7)}`)).body.bill;
+  check('monthly spend counts this month charges, not coverage', stats.spend.month === monthBill.total);
+  check('monthly spend is smaller than the subscription total', stats.spend.month < stats.spend.total);
+  check('remaining budget = budget - monthly spend', stats.budget.remaining === 300 - stats.spend.month);
   check('over-budget flag is raised', stats.budget.overBudget === true);
   check('upcoming only contains active items in window', stats.upcoming.length === 1);
   check('upcoming is sorted by days left', stats.upcoming[0].daysLeft === 3);
@@ -280,7 +282,35 @@ console.log('\nbills (monthly statements)');
   const stats = (await call('GET', '/api/stats')).body.stats;
   const current = months[0];
   check('current month total matches /api/stats month spend', current.total === stats.spend.month);
-  check('current month count matches the dashboard monthly set', current.count === stats.monthlySubscriptions.length);
+  // A weekly plan pays four or five times a month, so the statement counts
+  // charges — not "one line per subscription per month".
+  const weekly = await call('POST', '/api/subscriptions', {
+    name: '周付演练', amount: 10, cycle: 'weekly', autoRenew: false,
+    startDate: addDays(TODAY, -21), endDate: addDays(TODAY, 14),
+  });
+  const weeklyId = weekly.body.subscription.id;
+  const weeklyBill = (await call('GET', `/api/bills/${current.month}`)).body.bill;
+  const weeklyCharges = weeklyBill.items.filter((item) => item.id === weeklyId);
+  check('a weekly plan is charged once per week', weeklyCharges.length >= 3);
+  check('every charge keeps its own date', new Set(weeklyCharges.map((c) => c.chargeDate)).size === weeklyCharges.length);
+  check('the month total adds up every charge', weeklyBill.total === round2(current.total + weeklyCharges.length * 10));
+
+  // A one-off purchase is charged on the day it was bought, and never again.
+  const once = await call('POST', '/api/subscriptions', {
+    name: '买断演练', amount: 500, cycle: 'once', autoRenew: false,
+    startDate: addDays(TODAY, -40), endDate: addDays(TODAY, 40),
+  });
+  const onceId = once.body.subscription.id;
+  check(
+    'a one-off purchase is charged once, in the month it was paid',
+    (await call('GET', `/api/bills/${addDays(TODAY, -40).slice(0, 7)}`)).body.bill.items.filter((i) => i.id === onceId).length === 1,
+  );
+  check(
+    'a one-off purchase is not billed again in later months',
+    !weeklyBill.items.some((item) => item.id === onceId),
+  );
+
+  for (const cleanup of [weeklyId, onceId]) await call('DELETE', `/api/subscriptions/${cleanup}`);
 
   const sum = round2(months.reduce((acc, m) => acc + m.total, 0));
   check('summary total sums every month', body.summary.total === sum);
@@ -876,6 +906,129 @@ console.log('\nupdate & delete');
   check('stats recompute after delete', statsAfter.body.stats.spend.total === 1186 - 78 + 60);
 }
 
+/* ------------------------------------------------------ auto-renew rolling */
+
+console.log('\nauto-renew rolling');
+{
+  check(
+    'month-end cycles keep their anchor day instead of drifting',
+    addCycles('2026-01-31', 'monthly', 1) === '2026-02-28' && addCycles('2026-01-31', 'monthly', 2) === '2026-03-31',
+  );
+
+  const start = addDays(TODAY, -100);
+  const created = await call('POST', '/api/subscriptions', {
+    name: '自动续费演练', amount: 30, cycle: 'monthly', autoRenew: true,
+    startDate: start, endDate: addDays(TODAY, -5),
+  });
+  const id = created.body.subscription.id;
+  check('a lapsed renewing subscription is rolled the moment it is read', created.body.subscription.daysLeft >= 0 && created.body.subscription.statusLabel === 'active');
+  check('the roll lands on the next cycle boundary', created.body.subscription.daysLeft <= 31);
+  check('the start date stays put so past months keep their charges', created.body.subscription.startDate === start);
+
+  const listed = await call('GET', '/api/subscriptions');
+  const rolled = listed.body.items.find((item) => item.id === id);
+  check('the list shows the same rolled dates as the detail view', rolled.endDate === created.body.subscription.endDate);
+
+  const reopened = await call('GET', `/api/subscriptions/${id}`);
+  check('rolling twice changes nothing', reopened.body.subscription.endDate === rolled.endDate);
+
+  // Lapsed for months: it must catch up to the *current* period, not the next one.
+  const weekly = await call('POST', '/api/subscriptions', {
+    name: '长期欠费演练', amount: 12, cycle: 'weekly', autoRenew: true,
+    startDate: addDays(TODAY, -365), endDate: addDays(TODAY, -300),
+  });
+  const weeklyView = await call('GET', `/api/subscriptions/${weekly.body.subscription.id}`);
+  check('a weekly subscription lapsed for a year catches up in one step', weeklyView.body.subscription.daysLeft >= 0 && weeklyView.body.subscription.daysLeft < 7);
+
+  const fixed = await call('POST', '/api/subscriptions', {
+    name: '不续费演练', amount: 5, cycle: 'monthly', autoRenew: false,
+    startDate: addDays(TODAY, -40), endDate: addDays(TODAY, -10),
+  });
+  const fixedView = await call('GET', `/api/subscriptions/${fixed.body.subscription.id}`);
+  check('without auto-renew the subscription stays expired', fixedView.body.subscription.daysLeft === -10);
+
+  const oneOff = await call('POST', '/api/subscriptions', {
+    name: '买断演练', amount: 5, cycle: 'once', autoRenew: true,
+    startDate: addDays(TODAY, -40), endDate: addDays(TODAY, -10),
+  });
+  const oneOffView = await call('GET', `/api/subscriptions/${oneOff.body.subscription.id}`);
+  check('a one-off purchase has no next cycle to roll into', oneOffView.body.subscription.daysLeft === -10);
+
+  const paused = await call('POST', '/api/subscriptions', {
+    name: '暂停演练', amount: 5, cycle: 'monthly', autoRenew: true, status: 'paused',
+    startDate: addDays(TODAY, -40), endDate: addDays(TODAY, -10),
+  });
+  const pausedView = await call('GET', `/api/subscriptions/${paused.body.subscription.id}`);
+  check('a paused subscription is left alone', pausedView.body.subscription.daysLeft === -10);
+
+  const startBill = await call('GET', `/api/bills/${start.slice(0, 7)}`);
+  check('a rolled subscription keeps its earlier charges on the statement', startBill.body.bill.items.some((item) => item.id === id));
+
+  await call('POST', '/api/reminders/run');
+  const notices = await call('GET', '/api/notifications?limit=200');
+  check('a rolled subscription is never reported as expired', !notices.body.notifications.some((n) => n.subscriptionId === id && n.kind === 'expired'));
+
+  const ids = [id, weekly.body.subscription.id, fixed.body.subscription.id, oneOff.body.subscription.id, paused.body.subscription.id];
+  for (const subscriptionId of ids) await call('DELETE', `/api/subscriptions/${subscriptionId}`);
+  const left = await call('GET', '/api/subscriptions');
+  check('auto-renew fixtures are cleaned up', ids.every((subscriptionId) => !left.body.items.some((item) => item.id === subscriptionId)));
+}
+
+console.log('\nmanual renewal');
+{
+  // The everyday case: the payment went through, the panel just does not know.
+  const created = await call('POST', '/api/subscriptions', {
+    name: '手动续期演练', amount: 20, cycle: 'monthly', autoRenew: false,
+    startDate: addDays(TODAY, -28), endDate: addDays(TODAY, 2),
+  });
+  const id = created.body.subscription.id;
+  const before = created.body.subscription.endDate;
+
+  const renewed = await call('POST', `/api/subscriptions/${id}/renew`);
+  check('renewing answers with the updated subscription', renewed.status === 200 && renewed.body.previousEndDate === before);
+  check('the due date moves on by exactly one cycle', renewed.body.subscription.endDate === addCycles(before, 'monthly', 1));
+  check('the renewal records the day it was paid', renewed.body.charge.paidAt === TODAY);
+  const renewedBill = await call('GET', `/api/bills/${TODAY.slice(0, 7)}`);
+  check(
+    'a renewal lands on this month statement straight away',
+    renewedBill.body.bill.items.some((item) => item.id === id && item.chargeDate === TODAY),
+  );
+  check('a subscription without auto-renew can still be renewed by hand', renewed.body.subscription.autoRenew === false && renewed.body.subscription.daysLeft > 2);
+
+  const twice = await call('POST', `/api/subscriptions/${id}/renew`);
+  check('clicking again adds another cycle', twice.body.subscription.endDate === addCycles(before, 'monthly', 2));
+
+  // Owed for months: one click has to bring it back into the current period.
+  const behind = await call('POST', '/api/subscriptions', {
+    name: '欠费补缴演练', amount: 20, cycle: 'monthly', autoRenew: false,
+    startDate: addDays(TODAY, -200), endDate: addDays(TODAY, -100),
+  });
+  const caughtUp = await call('POST', `/api/subscriptions/${behind.body.subscription.id}/renew`);
+  check('a subscription in arrears catches up to this period in one click', caughtUp.body.subscription.daysLeft >= 0);
+
+  const weekly = await call('POST', '/api/subscriptions', {
+    name: '按周续期演练', amount: 5, cycle: 'weekly', autoRenew: false,
+    startDate: addDays(TODAY, -5), endDate: addDays(TODAY, 1),
+  });
+  const weeklyRenewed = await call('POST', `/api/subscriptions/${weekly.body.subscription.id}/renew`);
+  check('a weekly subscription moves on by seven days', weeklyRenewed.body.subscription.endDate === addDays(TODAY, 8));
+
+  const oneOff = await call('POST', '/api/subscriptions', {
+    name: '买断续期演练', amount: 5, cycle: 'once', autoRenew: false,
+    startDate: addDays(TODAY, -5), endDate: addDays(TODAY, 1),
+  });
+  const refused = await call('POST', `/api/subscriptions/${oneOff.body.subscription.id}/renew`);
+  check('a one-off purchase refuses to renew', refused.status === 422 && refused.body.error.message.includes('一次性买断'));
+
+  const missing = await call('POST', '/api/subscriptions/does-not-exist/renew');
+  check('renewing an unknown subscription is a 404', missing.status === 404);
+
+  const ids = [id, behind.body.subscription.id, weekly.body.subscription.id, oneOff.body.subscription.id];
+  for (const subscriptionId of ids) await call('DELETE', `/api/subscriptions/${subscriptionId}`);
+  const left = await call('GET', '/api/subscriptions');
+  check('manual renewal fixtures are cleaned up', ids.every((subscriptionId) => !left.body.items.some((item) => item.id === subscriptionId)));
+}
+
 /* ------------------------------------------------------------- throttling */
 
 /* ---------------------------------------------------------- schema bootstrap */
@@ -891,7 +1044,7 @@ console.log('\nschema bootstrap');
   const fresh = createD1();
   const booted = await worker.fetch(new Request('https://api.test/api/public'), { ...env, DB: fresh });
   const tables = fresh._sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
-  check('an empty database gets its tables on the first request', booted.status === 200 && ['subscriptions', 'settings', 'notifications', 'push_subscriptions'].every((name) => tables.includes(name)));
+  check('an empty database gets its tables on the first request', booted.status === 200 && ['subscriptions', 'settings', 'notifications', 'payments', 'push_subscriptions'].every((name) => tables.includes(name)));
 
   const seeded = fresh._sqlite.prepare('SELECT COUNT(*) AS n FROM settings').get().n;
   check('every setting is seeded with its default', seeded === Object.keys(SETTINGS_SCHEMA).length);
@@ -916,6 +1069,30 @@ console.log('\nschema bootstrap');
 }
 
 /* --------------------------------------------------------------- hardening */
+
+console.log('\nfront-end routing');
+{
+  // The built SPA ships as static assets next to the API: the Worker hands every
+  // non-API path over to them, and /api/* never ends up in the asset layer.
+  const assets = {
+    fetch: (request) =>
+      new Response(`<!doctype html>spa:${new URL(request.url).pathname}`, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+  };
+  const spa = await worker.fetch(new Request('https://api.test/bills?months=3'), { ...env, ASSETS: assets });
+  check('a page request is served from the assets binding', spa.status === 200 && (await spa.text()).includes('spa:/bills'));
+
+  const unknownApi = await worker.fetch(new Request('https://api.test/api/nope'), { ...env, ASSETS: assets });
+  check('the assets never swallow an /api path', !unknownApi.headers.get('location') && unknownApi.headers.get('content-type')?.includes('json'));
+
+  const missingAsset = { fetch: () => new Response('not found', { status: 404 }) };
+  const notFound = await worker.fetch(new Request('https://api.test/login'), { ...env, ASSETS: missingAsset });
+  check('a miss in the assets falls through to the JSON 404', notFound.status === 404);
+
+  const noAssets = await worker.fetch(new Request('https://api.test/login'), env);
+  check('without an assets binding the JSON 404 stays', noAssets.status === 404);
+}
 
 console.log('\nrequest hardening');
 {

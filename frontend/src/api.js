@@ -107,6 +107,7 @@ export const api = {
   getSubscription: (id, signal) => request(`/subscriptions/${id}`, { signal }),
   createSubscription: (payload) => request('/subscriptions', { method: 'POST', body: payload }),
   updateSubscription: (id, payload) => request(`/subscriptions/${id}`, { method: 'PUT', body: payload }),
+  renewSubscription: (id) => request(`/subscriptions/${id}/renew`, { method: 'POST' }),
   deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: 'DELETE' }),
 
   getSettings: (signal) => request('/settings', { signal }),

@@ -7,7 +7,7 @@ defineProps({
   compact: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['edit']);
+const emit = defineEmits(['edit', 'renew']);
 </script>
 
 <template>
@@ -32,6 +32,17 @@ const emit = defineEmits(['edit']);
         <span class="body-sm strong tabular">{{ formatMoney(item.amount, item.currency) }}</span>
         <span class="caption">到期金额</span>
       </div>
+      <button
+        type="button"
+        class="icon-btn icon-btn--sm upcoming__renew"
+        aria-label="续期"
+        title="按周期顺延到期时间"
+        @click.stop="emit('renew', item)"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3" /><path d="M20.5 3.5v4.2h-4.2" />
+        </svg>
+      </button>
     </li>
   </ul>
 </template>
@@ -93,6 +104,15 @@ const emit = defineEmits(['edit']);
   align-items: flex-end;
   gap: 1px;
   flex: none;
+}
+
+.upcoming__renew {
+  flex: none;
+  color: var(--mute);
+}
+
+.upcoming__renew:hover {
+  color: var(--ink);
 }
 
 .upcoming__row--warning .upcoming__main .caption { color: var(--warning-deep); }

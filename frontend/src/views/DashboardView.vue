@@ -6,10 +6,11 @@ import BudgetMeter from '../components/BudgetMeter.vue';
 import TimelineChart from '../components/TimelineChart.vue';
 import UpcomingList from '../components/UpcomingList.vue';
 import SubscriptionTable from '../components/SubscriptionTable.vue';
+import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyState from '../components/EmptyState.vue';
 import { api } from '../api.js';
 import { useAppShell } from '../lib/appShell.js';
-import { store, runReminders } from '../store.js';
+import { deleteSubscription, renewSubscription, store, runReminders } from '../store.js';
 import { openSubscriptionDialog } from '../lib/dialog.js';
 import { formatMoney, formatPercent } from '../lib/format.js';
 import { monthLabel } from '../lib/date.js';
@@ -18,6 +19,8 @@ const shell = useAppShell();
 const recent = ref([]);
 const loadingRecent = ref(true);
 const scanning = ref(false);
+const pendingDelete = ref(null);
+const deleting = ref(false);
 
 const stats = computed(() => store.stats);
 const currency = computed(() => stats.value?.currency ?? 'CNY');
@@ -37,6 +40,31 @@ async function loadRecent() {
     recent.value = [];
   } finally {
     loadingRecent.value = false;
+  }
+}
+
+let renewing = false;
+
+async function renew(item) {
+  if (renewing) return;
+  renewing = true;
+  try {
+    await renewSubscription(item.id, item.name);
+  } catch {
+    /* the store already surfaced the reason */
+  } finally {
+    renewing = false;
+  }
+}
+
+async function confirmDelete() {
+  if (!pendingDelete.value) return;
+  deleting.value = true;
+  try {
+    await deleteSubscription(pendingDelete.value.id, pendingDelete.value.name);
+    pendingDelete.value = null;
+  } finally {
+    deleting.value = false;
   }
 }
 
@@ -94,7 +122,7 @@ watch(() => store.revision, loadRecent);
           :hint="stats?.budget.overBudget ? '已超支' : hasBudget ? `已用 ${formatPercent(stats?.budget.usedRatio ?? 0)}` : '未设置'"
           :value="hasBudget ? formatMoney(stats?.budget.remaining ?? 0, currency) : '—'"
           :caption="hasBudget
-            ? `月度预算 ${formatMoney(stats?.budget.monthly ?? 0, currency)} · 本月已用 ${formatMoney(stats?.spend.month ?? 0, currency)}`
+            ? `月度预算 ${formatMoney(stats?.budget.monthly ?? 0, currency)} · 本月扣费 ${formatMoney(stats?.spend.month ?? 0, currency)}`
             : '前往设置填写月度预算，即可追踪剩余额度'"
         >
           <BudgetMeter
@@ -136,7 +164,7 @@ watch(() => store.revision, loadRecent);
             </div>
             <span v-if="upcoming.length" class="badge badge--warning">{{ upcoming.length }} 个待处理</span>
           </header>
-          <UpcomingList v-if="upcoming.length" :items="upcoming" @edit="openSubscriptionDialog" />
+          <UpcomingList v-if="upcoming.length" :items="upcoming" @edit="openSubscriptionDialog" @renew="renew" />
           <EmptyState
             v-else
             title="近期没有到期订阅"
@@ -170,7 +198,7 @@ watch(() => store.revision, loadRecent);
           <article class="card">
             <header class="stack gap-xxs">
               <h2 class="display-sm">月度趋势</h2>
-              <p class="caption">未来 6 个月的订阅覆盖金额</p>
+              <p class="caption">未来 6 个月预计扣费（含本月剩余扣费）</p>
             </header>
             <TimelineChart
               v-if="stats?.timeline.length"
@@ -197,7 +225,8 @@ watch(() => store.revision, loadRecent);
             :items="recent"
             :loading="loadingRecent"
             @edit="openSubscriptionDialog"
-            @delete="openSubscriptionDialog"
+            @delete="pendingDelete = $event"
+            @renew="renew"
           />
           <EmptyState
             v-else
@@ -209,6 +238,16 @@ watch(() => store.revision, loadRecent);
         </article>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="Boolean(pendingDelete)"
+      title="删除这条订阅？"
+      :description="`将永久删除「${pendingDelete?.name ?? ''}」及其提醒记录，此操作不可撤销。`"
+      confirm-label="确认删除"
+      :busy="deleting"
+      @close="pendingDelete = null"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 

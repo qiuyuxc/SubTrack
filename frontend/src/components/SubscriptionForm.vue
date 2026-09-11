@@ -308,7 +308,7 @@ async function removeConfirmed() {
           <ToggleSwitch
             v-model="form.autoRenew"
             label="到期后继续扣费"
-            hint="提醒里会带上续费金额"
+            hint="到期当天自动按周期顺延，开始时间保留为首次订阅日"
           />
         </div>
       </div>

@@ -277,6 +277,27 @@ export async function updateSubscription(id, payload) {
   }
 }
 
+/**
+ * Manual renewal: the end date jumps to the next cycle. Handy when the payment
+ * already went through but the panel still shows the old due date.
+ */
+export async function renewSubscription(id, name) {
+  try {
+    const { subscription, previousEndDate } = await api.renewSubscription(id);
+    pushToast(
+      `${name ? `「${name}」` : '订阅'}已续期至 ${subscription.endDate}` +
+        (previousEndDate ? `（原 ${previousEndDate}）` : '') +
+        '，已记入本月账单',
+      { tone: 'success' },
+    );
+    await Promise.all([refreshStats(), refreshNotifications()]);
+    return subscription;
+  } catch (error) {
+    reportError(error, '续期失败');
+    throw error;
+  }
+}
+
 export async function deleteSubscription(id, name) {
   try {
     await api.deleteSubscription(id);

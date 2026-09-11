@@ -5,7 +5,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyState from '../components/EmptyState.vue';
 import AppSelect from '../components/AppSelect.vue';
 import { api } from '../api.js';
-import { store, deleteSubscription } from '../store.js';
+import { store, deleteSubscription, renewSubscription } from '../store.js';
 import { openSubscriptionDialog } from '../lib/dialog.js';
 import { useAppShell } from '../lib/appShell.js';
 import { formatMoney } from '../lib/format.js';
@@ -36,6 +36,8 @@ const sort = ref('end-asc');
 const search = ref('');
 const pendingDelete = ref(null);
 const deleting = ref(false);
+// Guards against a double click stacking two cycles onto the same subscription.
+let renewing = false;
 const loadError = ref(null);
 
 let debounce = null;
@@ -68,6 +70,18 @@ watch(search, () => {
   clearTimeout(debounce);
   debounce = setTimeout(load, 250);
 });
+
+async function renew(item) {
+  if (renewing) return;
+  renewing = true;
+  try {
+    await renewSubscription(item.id, item.name);
+  } catch {
+    /* the store already surfaced the reason */
+  } finally {
+    renewing = false;
+  }
+}
 
 async function confirmDelete() {
   if (!pendingDelete.value) return;
@@ -145,6 +159,7 @@ onMounted(load);
         :items="items"
         @edit="openSubscriptionDialog"
         @delete="pendingDelete = $event"
+        @renew="renew"
       />
 
       <EmptyState

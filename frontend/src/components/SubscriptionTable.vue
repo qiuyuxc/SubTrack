@@ -9,7 +9,7 @@ defineProps({
   loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['edit', 'delete']);
+const emit = defineEmits(['edit', 'delete', 'renew']);
 
 // Below this width the 8-column table stops being readable, so the same rows
 // render as tappable cards instead (tapping opens the edit dialog).
@@ -76,6 +76,18 @@ const isUrgent = (item) => item.daysLeft >= 0 && item.daysLeft <= 7;
           </td>
           <td>
             <div class="cell-actions">
+              <button
+                type="button"
+                class="icon-btn icon-btn--sm"
+                aria-label="续期"
+                :title="item.cycle === 'once' ? '一次性买断没有下一个周期' : '按周期顺延到期时间'"
+                :disabled="item.cycle === 'once'"
+                @click="emit('renew', item)"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3" /><path d="M20.5 3.5v4.2h-4.2" />
+                </svg>
+              </button>
               <button type="button" class="icon-btn icon-btn--sm" aria-label="编辑" @click="emit('edit', item)">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13.5 6.5 4 4" />
@@ -126,6 +138,18 @@ const isUrgent = (item) => item.daysLeft >= 0 && item.daysLeft <= 7;
       </button>
 
       <div class="sub-card__actions">
+        <button
+          type="button"
+          class="icon-btn icon-btn--sm"
+          aria-label="续期"
+          :title="item.cycle === 'once' ? '一次性买断没有下一个周期' : '按周期顺延到期时间'"
+          :disabled="item.cycle === 'once'"
+          @click="emit('renew', item)"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3" /><path d="M20.5 3.5v4.2h-4.2" />
+                </svg>
+        </button>
         <button type="button" class="icon-btn icon-btn--sm" aria-label="编辑" @click="emit('edit', item)">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13.5 6.5 4 4" />

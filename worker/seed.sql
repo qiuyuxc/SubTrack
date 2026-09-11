@@ -1,9 +1,6 @@
 -- Demo data for local development only: npm run seed:demo
---   (or: npm --prefix worker run db:seed:local)
---
--- Do NOT run this against a deployed database: it deletes every row in
--- `subscriptions` and `notifications` before inserting the demo set. The
--- worker never applies it on its own.
+-- It clears `subscriptions` and `notifications` first, so do not run it against
+-- a deployed database. The worker never applies it on its own.
 --
 -- All dates are relative to "now" so the 7-day reminder window always has entries.
 

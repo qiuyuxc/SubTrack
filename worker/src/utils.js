@@ -51,6 +51,29 @@ export function daysBetween(from, to) {
   return Math.round((toDate(to) - toDate(from)) / 86400000);
 }
 
+/** Adds whole months, clamping to the last day when the target month is shorter. */
+export function addMonths(value, months) {
+  const [y, m, d] = value.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+const CYCLE_MONTHS = { weekly: 0, monthly: 1, quarterly: 3, yearly: 12 };
+
+/**
+ * The same date `count` billing cycles later. `once` has no next cycle and
+ * returns null. Months always counts from the date it is given, so calling it
+ * with the original start date keeps the day of month from drifting.
+ */
+export function addCycles(value, cycle, count = 1) {
+  if (cycle === 'weekly') return addDays(value, 7 * count);
+  const months = CYCLE_MONTHS[cycle];
+  if (!months) return null;
+  return addMonths(value, months * count);
+}
+
 export function isValidDate(value) {
   if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
   return toDate(value).toISOString().slice(0, 10) === value;

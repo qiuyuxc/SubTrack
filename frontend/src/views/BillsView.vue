@@ -54,7 +54,7 @@ watch(() => store.revision, load);
         <p class="eyebrow">本月账单</p>
         <p class="display-md tabular">{{ formatMoney(months.find((m) => m.current)?.total ?? 0, currency) }}</p>
         <p class="caption">
-          {{ months.find((m) => m.current)?.count ?? 0 }} 笔订阅 ·
+          {{ months.find((m) => m.current)?.count ?? 0 }} 笔扣费 ·
           {{ months.find((m) => m.current)?.label ?? '—' }}
         </p>
       </article>
@@ -97,7 +97,7 @@ watch(() => store.revision, load);
                 <span v-if="entry.current" class="badge badge--success">本月</span>
                 <span v-else-if="!entry.count" class="badge">无扣费</span>
               </span>
-              <span class="caption">{{ entry.count }} 笔订阅</span>
+              <span class="caption">{{ entry.count }} 笔扣费</span>
             </span>
 
             <span class="month__cats">
