@@ -1,6 +1,7 @@
 {
   "name": "subtrack",
   "version": "1.0.0",
+  "license": "MIT",
   "private": true,
   "description": "SubTrack — 订阅管理系统，Cloudflare Worker + D1 + Vue 3（Vercel 设计规范）",
   "type": "module",

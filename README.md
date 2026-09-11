@@ -339,3 +339,7 @@ npm run test:all      # 全部 512 条
 - **部分浏览器收不到 Web Push**：Web Push 依赖浏览器自带的推送服务，没有内置推送服务的浏览器收不到通知。真要在手机上收到提醒，可以用 Webhook 渠道推到 ntfy / Bark / Server 酱（微信）或群机器人，这些 App/服务自带可用的推送通道。
 - 浏览器推送需要浏览器自带推送服务。Chrome / Edge（FCM）、Firefox、Safari（APNs）都行，但发行版 Chromium（例如 Termux 的 `chromium-browser`）没有内置推送服务，`pushManager.subscribe()` 要么抛 `Registration failed - push service error`，要么干脆一直不返回——前端为此加了 15 秒超时，超时后设置页会提示「当前浏览器没有可用的推送服务」，并且不会把渠道开关留在开启状态。
 - Service Worker 采用「网络优先 + 缓存兜底」，不预缓存构建产物：离线只能打开已经访问过的页面外壳，数据仍需要联网。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 qiuyuxc
