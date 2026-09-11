@@ -7,6 +7,47 @@ export const CYCLES = ['weekly', 'monthly', 'quarterly', 'yearly', 'once'];
 export const STATUSES = ['active', 'paused', 'cancelled'];
 
 /**
+ * Exchange rates read as "how many CNY one unit of the currency is worth".
+ * A subscription keeps the currency it was entered in, but everything that is
+ * added up — dashboard totals, the budget, the monthly statements — is brought
+ * onto the display currency first, so ¥ and $ are never summed as if they were
+ * the same money. Editable from settings (`exchange_rates`, a JSON object keyed
+ * by ISO code).
+ */
+export const DEFAULT_EXCHANGE_RATES = {
+  CNY: 1, USD: 6.7, EUR: 7.3, JPY: 0.045, GBP: 8.6, HKD: 0.86,
+};
+
+/** Parses the stored JSON, ignoring junk and keeping defaults for missing codes. */
+export function parseExchangeRates(value) {
+  const rates = { ...DEFAULT_EXCHANGE_RATES };
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    if (!parsed.trim()) return rates;
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return rates;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return rates;
+  for (const [code, rate] of Object.entries(parsed)) {
+    const numeric = Number(rate);
+    if (Number.isFinite(numeric) && numeric > 0) rates[code.toUpperCase()] = numeric;
+  }
+  return rates;
+}
+
+/** `amount` of `from` expressed in `to`. An unknown code is left untouched (1:1). */
+export function convertAmount(amount, from, to, rates = DEFAULT_EXCHANGE_RATES) {
+  const value = Number(amount) || 0;
+  const source = rates[String(from || 'CNY').toUpperCase()] ?? 1;
+  const target = rates[String(to || 'CNY').toUpperCase()] ?? 1;
+  if (!source || !target) return round2(value);
+  return round2((value * source) / target);
+}
+
+/**
  * Settings live in a flat key/value table. This schema is the single source of
  * truth for defaults, coercion, and which fields are secret (never echoed back
  * to the browser).
@@ -14,6 +55,7 @@ export const STATUSES = ['active', 'paused', 'cancelled'];
 export const SETTINGS_SCHEMA = {
   monthlyBudget: { type: 'number', default: 0 },
   currency: { type: 'string', default: 'CNY' },
+  exchangeRates: { type: 'string', default: JSON.stringify(DEFAULT_EXCHANGE_RATES) },
   reminderDays: { type: 'number', default: 7 },
   timezone: { type: 'string', default: 'Asia/Shanghai' },
   showHero: { type: 'bool', default: false },
@@ -422,10 +464,25 @@ export async function listSubscriptions(db, { status, q, sort } = {}) {
   const { results } = await db.prepare(sql).bind(...params).all();
   let items = (results ?? []).map((row) => hydrate(row, today, settings.reminderDays));
   if (status === 'expiring') items = items.filter((item) => item.expiringSoon);
+
+  // Totals for the filtered list, converted onto the display currency so a
+  // mixed ¥/$ list is never summed as if the two were equal.
+  const rates = parseExchangeRates(settings.exchangeRates);
+  const totalOf = (pick) =>
+    round2(items.reduce(
+      (sum, item) => sum + convertAmount(pick(item), item.currency, settings.currency, rates),
+      0,
+    ));
+
   return {
     items,
     today,
     reminderDays: settings.reminderDays,
+    totals: {
+      currency: settings.currency,
+      amount: totalOf((item) => item.amount),
+      monthlyEquivalent: totalOf((item) => item.monthlyEquivalent),
+    },
   };
 }
 
@@ -540,6 +597,11 @@ export async function computeStats(db) {
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
 
+  // Amounts stay in the currency they were entered in; every total below is
+  // converted onto the display currency first, or ¥ and $ would be added 1:1.
+  const rates = parseExchangeRates(settings.exchangeRates);
+  const inDisplay = (amount, currency) => convertAmount(amount, currency, settings.currency, rates);
+
   const monthlySubs = billable.filter(
     (item) => item.startDate <= monthEnd && item.endDate >= monthStart,
   );
@@ -550,17 +612,21 @@ export async function computeStats(db) {
   const charges = chargesByMonth(items, await loadPayments(db));
   const monthCharges = charges.get(monthKey(today)) ?? [];
 
-  const totalSpend = round2(billable.reduce((sum, item) => sum + item.amount, 0));
-  const monthSpend = round2(monthCharges.reduce((sum, charge) => sum + charge.amount, 0));
+  const totalSpend = round2(
+    billable.reduce((sum, item) => sum + inDisplay(item.amount, item.currency), 0),
+  );
+  const monthSpend = round2(
+    monthCharges.reduce((sum, charge) => sum + inDisplay(charge.amount, charge.currency), 0),
+  );
   const monthBudget = round2(settings.monthlyBudget);
   const remaining = round2(monthBudget - monthSpend);
   const monthlyEquivalent = round2(
-    active.reduce((sum, item) => sum + item.monthlyEquivalent, 0),
+    active.reduce((sum, item) => sum + inDisplay(item.monthlyEquivalent, item.currency), 0),
   );
 
   const byCategory = Object.entries(
     billable.reduce((acc, item) => {
-      acc[item.category] = round2((acc[item.category] ?? 0) + item.amount);
+      acc[item.category] = round2((acc[item.category] ?? 0) + inDisplay(item.amount, item.currency));
       return acc;
     }, {}),
   )
@@ -571,12 +637,17 @@ export async function computeStats(db) {
     .filter((item) => item.expiringSoon)
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
+  const upcomingSpend = round2(
+    upcoming.reduce((sum, item) => sum + inDisplay(item.amount, item.currency), 0),
+  );
+
   const timeline = [];
   for (let i = 0; i < 6; i += 1) {
     const date = new Date(toDate(monthStart));
     date.setUTCMonth(date.getUTCMonth() + i);
     const key = date.toISOString().slice(0, 7);
-    const amount = (charges.get(key) ?? []).reduce((sum, charge) => sum + charge.amount, 0);
+    const amount = (charges.get(key) ?? [])
+      .reduce((sum, charge) => sum + inDisplay(charge.amount, charge.currency), 0);
     timeline.push({ month: key, amount: round2(amount) });
   }
 
@@ -594,6 +665,7 @@ export async function computeStats(db) {
       month: monthSpend,
       total: totalSpend,
       monthlyEquivalent,
+      upcoming: upcomingSpend,
       monthLabel: monthKey(today),
     },
     counts: {
@@ -624,11 +696,12 @@ function monthLabel(month) {
   return `${year}年${Number(m)}月`;
 }
 
-function categoryTotals(items) {
+/** `amountOf` maps a charge onto the display currency so mixed currencies add up. */
+function categoryTotals(items, amountOf = (item) => item.amount) {
   const map = new Map();
   for (const item of items) {
     const entry = map.get(item.category) ?? { category: item.category, amount: 0, count: 0 };
-    entry.amount = round2(entry.amount + item.amount);
+    entry.amount = round2(entry.amount + amountOf(item));
     entry.count += 1;
     map.set(item.category, entry);
   }
@@ -646,6 +719,8 @@ export async function listBills(db, { months = BILL_MONTHS } = {}) {
   const { items } = await listSubscriptions(db, { status: 'all' });
 
   const charges = chargesByMonth(items, await loadPayments(db));
+  const rates = parseExchangeRates(settings.exchangeRates);
+  const inDisplay = (charge) => convertAmount(charge.amount, charge.currency, settings.currency, rates);
 
   const list = [];
   for (let i = 0; i < months; i += 1) {
@@ -656,9 +731,9 @@ export async function listBills(db, { months = BILL_MONTHS } = {}) {
     list.push({
       month,
       label: monthLabel(month),
-      total: round2(billed.reduce((sum, charge) => sum + charge.amount, 0)),
+      total: round2(billed.reduce((sum, charge) => sum + inDisplay(charge), 0)),
       count: billed.length,
-      byCategory: categoryTotals(billed),
+      byCategory: categoryTotals(billed, inDisplay),
       current: month === monthKey(today),
     });
   }
@@ -685,6 +760,8 @@ export async function getBill(db, month) {
 
   const billed = (chargesByMonth(items, await loadPayments(db)).get(month) ?? [])
     .sort((a, b) => a.chargeDate.localeCompare(b.chargeDate) || a.name.localeCompare(b.name));
+  const rates = parseExchangeRates(settings.exchangeRates);
+  const inDisplay = (charge) => convertAmount(charge.amount, charge.currency, settings.currency, rates);
 
   return {
     month,
@@ -692,10 +769,10 @@ export async function getBill(db, month) {
     today,
     current: month === monthKey(today),
     currency: settings.currency,
-    total: round2(billed.reduce((sum, charge) => sum + charge.amount, 0)),
+    total: round2(billed.reduce((sum, charge) => sum + inDisplay(charge), 0)),
     count: billed.length,
-    byCategory: categoryTotals(billed),
-    items: billed,
+    byCategory: categoryTotals(billed, inDisplay),
+    items: billed.map((charge) => ({ ...charge, displayAmount: inDisplay(charge) })),
   };
 }
 

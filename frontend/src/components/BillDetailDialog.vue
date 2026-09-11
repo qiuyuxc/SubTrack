@@ -31,7 +31,8 @@ const days = computed(() => {
   return [...groups.entries()].map(([date, items]) => ({
     date,
     items,
-    subtotal: items.reduce((sum, item) => sum + item.amount, 0),
+    // displayAmount is the charge converted onto the bill currency by the Worker.
+    subtotal: items.reduce((sum, item) => sum + (item.displayAmount ?? item.amount), 0),
   }));
 });
 
@@ -117,6 +118,9 @@ watch(
                 </span>
                 <span class="charge__meta">
                   <span class="body-sm strong tabular">{{ formatMoney(item.amount, item.currency) }}</span>
+                  <span v-if="item.currency !== currency && item.displayAmount != null" class="caption muted tabular">
+                    ≈ {{ formatMoney(item.displayAmount, currency) }}
+                  </span>
                   <span class="charge__flags">
                     <StatusBadge :item="item" />
                     <span v-if="item.autoRenew" class="caption">自动续费</span>

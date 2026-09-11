@@ -42,10 +42,12 @@ const loadError = ref(null);
 
 let debounce = null;
 
-const total = computed(() => items.value.reduce((sum, item) => sum + item.amount, 0));
-const monthlyTotal = computed(() =>
-  items.value.reduce((sum, item) => sum + (item.monthlyEquivalent ?? 0), 0),
-);
+// The Worker converts every amount onto the display currency before summing,
+// so the header never adds ¥ and $ as if they were the same money.
+const totals = ref(null);
+const total = computed(() => totals.value?.amount ?? 0);
+const monthlyTotal = computed(() => totals.value?.monthlyEquivalent ?? 0);
+const totalsCurrency = computed(() => totals.value?.currency ?? store.settings.currency);
 
 async function load() {
   loading.value = true;
@@ -57,9 +59,11 @@ async function load() {
       sort: sort.value,
     });
     items.value = data.items;
+    totals.value = data.totals ?? null;
   } catch (error) {
     loadError.value = error?.message ?? '加载失败';
     items.value = [];
+    totals.value = null;
   } finally {
     loading.value = false;
   }
@@ -104,9 +108,9 @@ onMounted(load);
         <h1 v-if="!shell" class="display-lg page__title">订阅列表</h1>
         <p class="caption">
           {{ items.length }} 条记录 · 合计
-          <strong class="strong tabular">{{ formatMoney(total, store.settings.currency) }}</strong>
+          <strong class="strong tabular">{{ formatMoney(total, totalsCurrency) }}</strong>
           · 折算每月
-          <strong class="strong tabular">{{ formatMoney(monthlyTotal, store.settings.currency) }}</strong>
+          <strong class="strong tabular">{{ formatMoney(monthlyTotal, totalsCurrency) }}</strong>
         </p>
       </div>
       <button v-if="!shell" type="button" class="btn btn--primary" @click="openSubscriptionDialog()">添加订阅</button>

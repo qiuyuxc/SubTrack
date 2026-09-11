@@ -25,9 +25,8 @@ const deleting = ref(false);
 const stats = computed(() => store.stats);
 const currency = computed(() => stats.value?.currency ?? 'CNY');
 const upcoming = computed(() => stats.value?.upcoming ?? []);
-const upcomingAmount = computed(() =>
-  upcoming.value.reduce((sum, item) => sum + item.amount, 0),
-);
+// Summed in the Worker, already converted onto the display currency.
+const upcomingAmount = computed(() => stats.value?.spend?.upcoming ?? 0);
 
 const hasBudget = computed(() => (stats.value?.budget.monthly ?? 0) > 0);
 

@@ -6,6 +6,7 @@ import { registerServiceWorker } from './lib/pwa.js';
 const EMPTY_SETTINGS = {
   monthlyBudget: 0,
   currency: 'CNY',
+  exchangeRates: '',
   reminderDays: 7,
   timezone: 'Asia/Shanghai',
   showHero: false,

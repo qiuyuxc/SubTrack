@@ -364,6 +364,7 @@ async function main() {
   check('settings page renders', $('.display-lg')?.textContent.includes('系统设置'));
   check('budget input is hydrated', $('#set-budget').value === '1400');
   check('reminder-days input is hydrated', $('#set-reminder').value === '7');
+  check('usd exchange rate is hydrated', $('#set-rate-USD').value === '6.7');
 
   const saveButton = () => $$('button[type="submit"]').find((button) => button.textContent.includes('保存设置'));
 

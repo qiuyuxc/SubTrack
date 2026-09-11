@@ -29,6 +29,16 @@ const TIMEZONES = [
   { value: 'America/Los_Angeles', label: 'America/Los_Angeles' },
 ];
 
+// Rates are "CNY per one unit", so a $10 subscription counts as ¥67 in the
+// totals instead of ¥10. CNY is the base and therefore not editable.
+const RATE_CURRENCIES = [
+  { code: 'USD', label: '美元 USD' },
+  { code: 'EUR', label: '欧元 EUR' },
+  { code: 'JPY', label: '日元 JPY' },
+  { code: 'HKD', label: '港币 HKD' },
+];
+const RATE_CODES = RATE_CURRENCIES.map((currency) => currency.code);
+
 const form = reactive({
   monthlyBudget: 0,
   currency: 'CNY',
@@ -36,11 +46,22 @@ const form = reactive({
   timezone: 'Asia/Shanghai',
   showHero: false,
   appMode: false,
+  rates: {},
 });
 
 const saving = ref(false);
 const saved = ref(false);
 const openChannel = ref(null);
+
+/** The rates are stored as a JSON string in settings; junk degrades to the seeded defaults. */
+function readRates(settings) {
+  try {
+    const parsed = JSON.parse(settings?.exchangeRates ?? '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function hydrate() {
   form.monthlyBudget = store.settings.monthlyBudget ?? 0;
@@ -49,9 +70,12 @@ function hydrate() {
   form.timezone = store.settings.timezone ?? 'Asia/Shanghai';
   form.showHero = Boolean(store.settings.showHero);
   form.appMode = Boolean(store.settings.appMode);
+  form.rates = { ...readRates(store.settings) };
 }
 
 watch(() => store.settings, hydrate, { immediate: true, deep: true });
+
+const storedRates = computed(() => readRates(store.settings));
 
 const dirty = computed(() => {
   const s = store.settings;
@@ -61,7 +85,11 @@ const dirty = computed(() => {
     Number(form.reminderDays) !== Number(s.reminderDays) ||
     form.timezone !== s.timezone ||
     Boolean(form.showHero) !== Boolean(s.showHero) ||
-    Boolean(form.appMode) !== Boolean(s.appMode)
+    Boolean(form.appMode) !== Boolean(s.appMode) ||
+    RATE_CODES.some((code) => {
+      const stored = Number(storedRates.value[code]);
+      return Number.isFinite(stored) && stored !== Number(form.rates?.[code]);
+    })
   );
 });
 
@@ -114,10 +142,16 @@ const channelCards = computed(() =>
 async function submit() {
   saving.value = true;
   saved.value = false;
+  const rates = { ...storedRates.value };
+  for (const code of RATE_CODES) {
+    const value = Number(form.rates?.[code]);
+    if (Number.isFinite(value) && value > 0) rates[code] = value;
+  }
   try {
     await saveSettings({
       monthly_budget: Number(form.monthlyBudget) || 0,
       currency: form.currency,
+      exchangeRates: JSON.stringify(rates),
       reminder_days: Number(form.reminderDays) || 7,
       timezone: form.timezone,
       showHero: Boolean(form.showHero),
@@ -171,6 +205,25 @@ function reset() {
                   v-model="form.currency"
                   :options="CURRENCIES"
                   aria-label="币种"
+                />
+              </div>
+            </div>
+
+            <div class="stack gap-xxs">
+              <p class="label">汇率</p>
+              <p class="hint">1 外币 = ? 人民币；账单、预算与首页合计都会按这里换算到展示币种。</p>
+            </div>
+            <div class="grid grid--2 grid--gap">
+              <div v-for="rate in RATE_CURRENCIES" :key="rate.code" class="field">
+                <label class="label" :for="`set-rate-${rate.code}`">{{ rate.label }}</label>
+                <input
+                  :id="`set-rate-${rate.code}`"
+                  v-model="form.rates[rate.code]"
+                  class="input"
+                  type="number"
+                  min="0"
+                  step="0.0001"
+                  inputmode="decimal"
                 />
               </div>
             </div>

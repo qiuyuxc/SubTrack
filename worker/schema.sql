@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES
   ('monthly_budget', '0', datetime('now')),
   ('currency', 'CNY', datetime('now')),
+  ('exchange_rates', '{"CNY":1,"USD":6.7,"EUR":7.3,"JPY":0.045,"GBP":8.6,"HKD":0.86}', datetime('now')),
   ('reminder_days', '7', datetime('now')),
   ('timezone', 'Asia/Shanghai', datetime('now')),
   ('show_hero', '0', datetime('now')),

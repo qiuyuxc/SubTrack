@@ -11,10 +11,10 @@ import { readFileSync } from 'node:fs';
 import { createD1 } from './d1-shim.mjs';
 import { decodeBase64Body, decodeHeaderWord, headerLines, smtpConnector, startSmtpServer } from './smtp-server.mjs';
 import worker from '../src/index.js';
-import { SETTINGS_SCHEMA } from '../src/db.js';
+import { DEFAULT_EXCHANGE_RATES, SETTINGS_SCHEMA } from '../src/db.js';
 import { SCHEMA_SQL } from '../src/schema.js';
 
-import { addCycles, addDays, todayIn } from '../src/utils.js';
+import { addCycles, addDays, round2, todayIn } from '../src/utils.js';
 
 const db = createD1();
 db._sqlite.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
@@ -371,6 +371,59 @@ console.log('\nbills (monthly statements)');
   check('an out-of-range month is rejected with 422', badMonth.status === 422);
   const badFormat = await call('GET', '/api/bills/not-a-month');
   check('a malformed month is rejected with 422', badFormat.status === 422);
+}
+
+/* ---------------------------------------------------------- multi-currency */
+
+console.log('\nmulti-currency settlement');
+{
+  // Seeded data is all CNY, so a single USD row isolates the conversion: the
+  // aggregates must bring $10 onto the display currency, not add it as ¥10.
+  const rate = DEFAULT_EXCHANGE_RATES.USD;
+  const converted = round2(10 * rate);
+  const month = TODAY.slice(0, 7);
+  const before = (await call('GET', '/api/stats')).body.stats;
+  const beforeBill = (await call('GET', `/api/bills/${month}`)).body.bill;
+  const beforeList = (await call('GET', '/api/subscriptions')).body.totals;
+
+  const created = await call('POST', '/api/subscriptions', {
+    name: '美元演练', amount: 10, currency: 'USD', category: '外币演练', cycle: 'once',
+    autoRenew: false, startDate: TODAY, endDate: TODAY,
+  });
+  const usdId = created.body.subscription.id;
+  check('a USD subscription keeps its own currency', created.body.subscription.currency === 'USD');
+
+  const stats = (await call('GET', '/api/stats')).body.stats;
+  check('total spend converts USD onto the display currency', stats.spend.total === round2(before.spend.total + converted));
+  check('monthly spend converts USD onto the display currency', stats.spend.month === round2(before.spend.month + converted));
+  check('upcoming spend converts USD onto the display currency', stats.spend.upcoming === round2(before.spend.upcoming + converted));
+  check('category totals convert USD onto the display currency', stats.byCategory.find((c) => c.category === '外币演练')?.amount === converted);
+
+  const bill = (await call('GET', `/api/bills/${month}`)).body.bill;
+  check('the statement total converts USD onto the display currency', bill.total === round2(beforeBill.total + converted));
+  const charge = bill.items.find((item) => item.id === usdId);
+  check('the charge keeps its native amount and currency', charge.amount === 10 && charge.currency === 'USD');
+  check('the charge carries the converted amount', charge.displayAmount === converted);
+
+  const list = (await call('GET', '/api/subscriptions')).body.totals;
+  check('the subscription list total converts too', list.amount === round2(beforeList.amount + converted));
+  check('the subscription list reports the display currency', list.currency === 'CNY');
+
+  // The rate itself must be editable, not hard-coded.
+  await call('PUT', '/api/settings', { exchangeRates: JSON.stringify({ ...DEFAULT_EXCHANGE_RATES, USD: 7 }) });
+  const raised = (await call('GET', '/api/stats')).body.stats;
+  check('a custom exchange rate changes the converted total', raised.spend.total === round2(before.spend.total + 70));
+  await call('PUT', '/api/settings', { exchangeRates: JSON.stringify(DEFAULT_EXCHANGE_RATES) });
+
+  // Switching the display currency re-bases every row, USD included.
+  await call('PUT', '/api/settings', { currency: 'USD' });
+  const inUsd = (await call('GET', '/api/stats')).body.stats;
+  check('a USD charge stays $10 when USD is the display currency', inUsd.byCategory.find((c) => c.category === '外币演练')?.amount === 10);
+  await call('PUT', '/api/settings', { currency: 'CNY' });
+
+  await call('DELETE', `/api/subscriptions/${usdId}`);
+  const restored = (await call('GET', '/api/stats')).body.stats;
+  check('deleting the USD subscription restores the totals', restored.spend.total === before.spend.total);
 }
 
 /* ---------------------------------------------------------- reminder core */
