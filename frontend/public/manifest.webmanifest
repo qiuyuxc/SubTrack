@@ -1,0 +1,25 @@
+{
+  "name": "SubTrack",
+  "short_name": "SubTrack",
+  "description": "记录订阅金额与周期，到期前自动提醒。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#171717",
+  "categories": ["productivity", "finance"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "概览", "url": "/dashboard" },
+    { "name": "账单", "url": "/bills" },
+    { "name": "订阅", "url": "/subscriptions" }
+  ]
+}

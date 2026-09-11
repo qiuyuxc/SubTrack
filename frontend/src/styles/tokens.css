@@ -1,0 +1,136 @@
+/* =============================================================================
+   Design tokens — Vercel-inspired system (see DESIGN.md)
+   Every value below traces back to a token in the design spec.
+   ========================================================================== */
+
+:root {
+  /* Surfaces */
+  --canvas: #ffffff;
+  --canvas-soft: #fafafa;
+  --canvas-soft-2: #f5f5f5;
+  --canvas-overlay: rgba(0, 0, 0, 0.4);
+
+  /* Text */
+  --ink: #171717;
+  --body: #4d4d4d;
+  --mute: #888888;
+  --on-primary: #ffffff;
+
+  /* Lines */
+  --hairline: #ebebeb;
+  --hairline-strong: #a1a1a1;
+
+  /* Primary (ink IS the conversion colour) */
+  --primary: #171717;
+  --primary-hover: #383838;
+  --primary-active: #000000;
+
+  /* Semantic */
+  --link: #0070f3;
+  --link-deep: #0761d1;
+  --link-bg-soft: #d3e5ff;
+  --success: #0070f3;
+  --error: #ee0000;
+  --error-soft: #f7d4d6;
+  --error-deep: #c50000;
+  --warning: #f5a623;
+  --warning-soft: #ffefcf;
+  --warning-deep: #ab570a;
+  --violet: #7928ca;
+  --violet-soft: #d8ccf1;
+  --violet-deep: #4c2889;
+  --cyan: #50e3c2;
+  --cyan-soft: #aaffec;
+  --cyan-deep: #29bc9b;
+
+  /* Brand gradient — never reduced to one colour, never used at icon scale */
+  --gradient-develop-start: #007cf0;
+  --gradient-develop-end: #00dfd8;
+  --gradient-preview-start: #7928ca;
+  --gradient-preview-end: #ff0080;
+  --gradient-ship-start: #ff4d4d;
+  --gradient-ship-end: #f9cb28;
+
+  /* Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill-sm: 64px;
+  --r-pill: 100px;
+  --r-full: 9999px;
+
+  /* Spacing — 4px base unit */
+  --sp-xxs: 4px;
+  --sp-xs: 8px;
+  --sp-sm: 12px;
+  --sp-md: 16px;
+  --sp-lg: 24px;
+  --sp-xl: 32px;
+  --sp-2xl: 40px;
+  --sp-3xl: 48px;
+  --sp-4xl: 64px;
+  --sp-5xl: 96px;
+
+  /* Typography */
+  --font-sans: Geist, Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+  /* Elevation — stacked small offsets + hairline ring, never one heavy drop */
+  --shadow-xs: 0 0 0 1px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.02),
+    0 2px 4px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.02),
+    0 2px 4px rgba(0, 0, 0, 0.03), 0 8px 16px -8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.03),
+    0 8px 16px -4px rgba(0, 0, 0, 0.06), 0 24px 48px -12px rgba(0, 0, 0, 0.12);
+
+  --page-width: 1400px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme='dark'] {
+  --canvas: #000000;
+  --canvas-soft: #0a0a0a;
+  --canvas-soft-2: #141414;
+  --canvas-overlay: rgba(0, 0, 0, 0.7);
+
+  --ink: #ffffff;
+  --body: #a1a1a1;
+  --mute: #888888;
+  --on-primary: #000000;
+
+  --hairline: #2e2e2e;
+  --hairline-strong: #444444;
+
+  --primary: #ffffff;
+  --primary-hover: #e6e6e6;
+  --primary-active: #cccccc;
+
+  --link: #3291ff;
+  --link-deep: #5ba7ff;
+  --link-bg-soft: #0d2847;
+  --success: #3291ff;
+
+  --error: #ff4d4d;
+  --error-soft: #3b0d0d;
+  --error-deep: #ff7a7a;
+  --warning: #f7b955;
+  --warning-soft: #3a2a0a;
+  --warning-deep: #ffca7a;
+  --violet: #a259ff;
+  --violet-soft: #2a1a3f;
+  --violet-deep: #c08cff;
+  --cyan: #50e3c2;
+  --cyan-soft: #0a3b32;
+  --cyan-deep: #7ff0d8;
+
+  --shadow-xs: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 1px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 1px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.4), 0 8px 16px -8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 2px 4px rgba(0, 0, 0, 0.4),
+    0 8px 16px -4px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+}

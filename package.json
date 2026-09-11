@@ -1,0 +1,21 @@
+{
+  "name": "subtrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SubTrack — 订阅管理系统，Cloudflare Worker + D1 + Vue 3（Vercel 设计规范）",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm --prefix frontend install && npm --prefix worker install",
+    "install:web": "npm --prefix frontend install",
+    "build": "npm --prefix frontend run build",
+    "start": "node tools/dev-server.mjs",
+    "serve": "npm run build && npm run start",
+    "seed": "node tools/seed.mjs",
+    "schema": "node tools/gen-schema.mjs",
+    "test": "npm --prefix worker test",
+    "test:render": "npm --prefix frontend run test:render",
+    "test:all": "npm run test && npm run test:render",
+    "dev:api": "npm --prefix worker run dev",
+    "dev:web": "npm --prefix frontend run dev"
+  }
+}

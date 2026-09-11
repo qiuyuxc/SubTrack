@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.data/
+.ssr-out/
+.client-out/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
