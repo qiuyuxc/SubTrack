@@ -56,7 +56,7 @@ Worker 不引入任何 npm 运行时依赖，只需要 `wrangler` 作为开发�
 │   ├── src/schema.js       表结构、默认设置与增量列（唯一事实来源）
 │   ├── src/bootstrap.js    首次请求时自动建表 / 补列
 │   ├── schema.sql          由 src/schema.js 生成（`npm run schema`），仅供手工执行
-│   ├── seed.sql            演示数据
+│   ├── seed.sql            演示数据（仅本地，会清空订阅表）
 │   └── test/smoke.mjs      222 条 API 断言（含一个进程内 SMTP 服务器）
 ├── frontend/               Vue 3 单页应用
 │   ├── src/styles/         设计 token + 基础组件样式
@@ -73,7 +73,7 @@ Worker 不引入任何 npm 运行时依赖，只需要 `wrangler` 作为开发�
 
 ```bash
 npm run install:all     # 安装前端与 Worker 依赖
-npm run seed            # 写入 7 条演示订阅（SQLite）
+npm run seed:demo       # 可选：写入 7 条演示订阅（只动本地 SQLite）
 npm run serve           # 构建前端并启动 → http://localhost:8787
 ```
 
@@ -100,7 +100,7 @@ ADMIN_USERNAME=me ADMIN_PASSWORD='一串足够长的口令' AUTH_SECRET='随机�
 
 ```bash
 # 终端 1 —— Worker + 本地 D1（表结构由 Worker 首次请求时自动创建）
-npm --prefix worker run db:seed
+npm --prefix worker run db:seed:local
 npm --prefix worker run dev          # http://127.0.0.1:8787
 
 # 终端 2 —— Vite（/api 已代理到 8787）
@@ -116,6 +116,8 @@ cd worker
 npx wrangler d1 create subtrack_db      # 把返回的 database_id 填进 wrangler.toml
 npx wrangler deploy
 ```
+
+> 线上库只会建表 + 写入 29 条默认设置，**没有任何演示数据**：`seed.sql` 与 `npm run seed:demo` 只作用于本地 SQLite，部署流程里不会执行它们。
 
 > 库里已经有一个叫别的名字的 D1 也没关系：把 `wrangler.toml` 里的 `database_name` 改成那个名字、`database_id` 填对即可，表结构照样自动建。
 

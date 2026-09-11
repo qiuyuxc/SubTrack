@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute subtrack_db --remote --file=./schema.sql",
     "db:init:local": "wrangler d1 execute subtrack_db --local --file=./schema.sql",
-    "db:seed": "wrangler d1 execute subtrack_db --local --file=./seed.sql",
+    "db:seed:local": "wrangler d1 execute subtrack_db --local --file=./seed.sql",
     "test": "node test/smoke.mjs"
   },
   "devDependencies": {

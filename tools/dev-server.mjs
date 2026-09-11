@@ -140,6 +140,6 @@ server.listen(PORT, () => {
   console.log(`\n  SubTrack 本地服务已启动`);
   console.log(`  → http://localhost:${PORT}`);
   console.log(`  → 数据库：${DB_PATH}`);
-  console.log(`  → 提示：npm run seed 可写入演示数据`);
+  console.log(`  → 提示：npm run seed:demo 可写入演示数据`);
   console.log(`  → 登录账号：${env.ADMIN_USERNAME} / ${usingDefaultCreds ? 'admin12345（本地默认，可用 ADMIN_PASSWORD 覆盖）' : '（来自 ADMIN_PASSWORD 环境变量）'}\n`);
 });
